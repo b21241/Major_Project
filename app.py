@@ -1,80 +1,69 @@
 from flask import Flask, request, jsonify
-import sqlite3
 
 app = Flask(__name__)
 
-def get_db():
-    conn = sqlite3.connect("notes.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+# Temporary in-memory storage - data will be lost when server stops
+users = []
+notes = []
 
 
-# ---------- DB Setup ----------
-def init_db():
-    conn = get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            title TEXT,
-            content TEXT,
-            note_date DATE
-        );
-    """)
-    conn.commit()
-    conn.close()
+# GET endpoint - View all notes
+@app.route("/notes/<int:user_id>", methods=["GET"])
+def get_user_notes(user_id):
+    user_notes = [n for n in notes if n["user_id"] == user_id]
 
-init_db()
+    return jsonify({
+        "user_id": user_id,
+        "notes": user_notes,
+        "count": len(user_notes)
+    }), 200
 
 
-# ---------- CREATE NOTE ----------
+@app.route("/users", methods=["POST"])
+def create_user():
+    data = request.json
+
+    if not data or "name" not in data:
+        return jsonify({"error": "name is required"}), 400
+
+    user = {
+        "id": len(users) + 1,
+        "name": data["name"]
+    }
+
+    users.append(user)
+
+    return jsonify({
+        "message": "User created successfully",
+        "user": user
+    }), 201
+
+
 @app.route("/notes", methods=["POST"])
 def create_note():
-    conn = None
-    try:
-        data = request.json
-        conn = get_db()
-        conn.execute(
-            "INSERT INTO notes (user_id, title, content, note_date) VALUES (?, ?, ?, ?)",
-            (data["user_id"], data["title"], data["content"], data["note_date"])
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Note created successfully"}), 201
-    except Exception as e:
-        if conn:
-            conn.close()
-        return jsonify({"error": str(e)}), 400
+    data = request.json
 
+    if not data or "user_id" not in data:
+        return jsonify({"error": "user_id is required"}), 400
 
-# ---------- FETCH NOTES BY USER + DATE ----------
-@app.route("/users/<int:user_id>/notes", methods=["GET"])
-def get_notes(user_id):
-    date = request.args.get("date")
+    # check user exists
+    user = next((u for u in users if u["id"] == data["user_id"]), None)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
 
-    if not date:
-        return jsonify({"error": "date query param required (YYYY-MM-DD)"}), 400
+    note = {
+        "id": len(notes) + 1,
+        "user_id": data["user_id"],
+        "title": data.get("title"),
+        "content": data.get("content")
+    }
 
-    conn = None
-    try:
-        conn = get_db()
-        cursor = conn.execute(
-            "SELECT * FROM notes WHERE user_id = ? AND note_date = ?",
-            (user_id, date)
-        )
+    notes.append(note)
 
-        notes = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        return jsonify({
-            "user_id": user_id,
-            "date": date,
-            "notes": notes
-        }), 200
-    except Exception as e:
-        if conn:
-            conn.close()
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "message": "Note created successfully",
+        "note": note
+    }), 201
 
 
 if __name__ == "__main__":
